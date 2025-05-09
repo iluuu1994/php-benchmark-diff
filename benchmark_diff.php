@@ -19,11 +19,11 @@ function standard_deviation(array $values, float $mean): float {
 }
 
 function independent_t_test(int $size1, float $mean1, float $stdDev1, int $size2, float $mean2, float $stdDev2) {
-    return ($mean1 - $mean2) / sqrt((($stdDev1 ** 2) / $size1) + (($stdDev2 ** 2) / $size2));
+    return abs($mean1 - $mean2) / sqrt((($stdDev1 ** 2) / $size1) + (($stdDev2 ** 2) / $size2));
 }
 
 function cohens_d(float $mean1, float $mean2, float $stdDev1, float $stdDev2) {
-    return (abs($mean1) - abs($mean2)) / sqrt($stdDev1 + $stdDev2) / 2;
+    return abs($mean1 - $mean2) / sqrt($stdDev1 + $stdDev2) / 2;
 }
 
 function p_value(int $df, float $tTest): float {
