@@ -24,10 +24,6 @@ function independent_t_test(int $size1, float $mean1, float $stdDev1, int $size2
     return abs($mean1 - $mean2) / sqrt((($stdDev1 ** 2) / $size1) + (($stdDev2 ** 2) / $size2));
 }
 
-function cohens_d(float $mean1, float $mean2, float $stdDev1, float $stdDev2) {
-    return abs($mean1 - $mean2) / sqrt((($stdDev1 ** 2) + ($stdDev2 ** 2)) / 2);
-}
-
 function p_value(int $df, float $tTest): float {
     $tTest = abs($tTest);
 
@@ -217,7 +213,6 @@ function main($argv) {
     $oldStdDev = standard_deviation($oldValues, $oldMean);
     $newStdDev = standard_deviation($newValues, $newMean);
     $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
-    $cohensD = cohens_d($oldMean, $newMean, $oldStdDev, $newStdDev);
     $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
 
     echo 'Old:       ', format_time($oldMean), ' ± ', format_time($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), ")\n";
@@ -225,7 +220,6 @@ function main($argv) {
     echo 'Diff:      ', format_time($diff), ' (', format_percentage($relativeDiff), ")\n";
     echo 'T-test:    ', number_format($tTest, 3, '.', ''), "\n";
     echo 'P-value:   ', number_format($pValue, 3, '.', ''), "\n";
-    echo "Cohen's d: ", number_format($cohensD, 3, '.', ''), "\n";
 }
 
 main($argv);
