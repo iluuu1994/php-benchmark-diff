@@ -100,7 +100,7 @@ function runCommand(string $cmd, bool $cgi): float {
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
     $start = hrtime(true);
-    $processHandle = proc_open($cmd, $descriptorSpec, $pipes, getcwd(), null);
+    $processHandle = proc_open('taskset -c 0 ' . $cmd, $descriptorSpec, $pipes, getcwd(), null);
 
     $stdin = $pipes[0];
     $stdout = $pipes[1];
