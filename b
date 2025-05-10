@@ -1,3 +1,4 @@
+#!/usr/bin/env php
 <?php
 
 function extract_measurement(string $input): float {
