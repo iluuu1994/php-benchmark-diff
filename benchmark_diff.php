@@ -1,8 +1,10 @@
 <?php
 
-/** @return list<string> */
-function extract_measurements(string $input, string $header): array {
-    preg_match_all("($header:\\s+Elapsed time: (?<time>[0-9]+\\.[0-9]+) sec)", $input, $matches);
+function extract_measurement(string $input): float {
+    if (preg_match("(Elapsed time: (?<time>[0-9]+\\.[0-9]+) sec)", $input, $matches) === 0) {
+        fwrite(STDERR, "Elapsed cgi time could not be detected\n");
+        exit(1);
+    }
     return $matches['time'];
 }
 
@@ -88,19 +90,6 @@ function p_value(int $df, float $tTest): float {
     throw new Exception('Unreachable');
 }
 
-$input = stream_get_contents(fopen('php://stdin', 'r'));
-$oldValues = extract_measurements($input, 'Old');
-$newValues = extract_measurements($input, 'New');
-$oldMean = mean($oldValues);
-$newMean = mean($newValues);
-$diff = $newMean - $oldMean;
-$relativeDiff = ($newMean / $oldMean - 1) * 100;
-$oldStdDev = standard_deviation($oldValues, $oldMean);
-$newStdDev = standard_deviation($newValues, $newMean);
-$tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
-$cohensD = cohens_d($oldMean, $newMean, $oldStdDev, $newStdDev);
-$pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
-
 function format_time(float $num) {
     return number_format($num, 6, '.', '');
 }
@@ -109,9 +98,134 @@ function format_percentage(float $num) {
     return number_format($num, 3, '.', '') . '%';
 }
 
-echo 'Old:       ', format_time($oldMean), ' ± ', format_time($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), ")\n";
-echo 'New:       ', format_time($newMean), ' ± ', format_time($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), ")\n";
-echo 'Diff:      ', format_time($diff), ' (', format_percentage($relativeDiff), ")\n";
-echo 'T-test:    ', number_format($tTest, 3, '.', ''), "\n";
-echo 'P-value:   ', number_format($pValue, 3, '.', ''), "\n";
-echo "Cohen's d: ", number_format($cohensD, 3, '.', ''), "\n";
+function runCommand(string $cmd, bool $cgi): float {
+    $pipes = null;
+    $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+
+    $start = hrtime(true);
+    $processHandle = proc_open($cmd, $descriptorSpec, $pipes, getcwd(), null);
+
+    $stdin = $pipes[0];
+    $stdout = $pipes[1];
+    $stderr = $pipes[2];
+
+    fclose($stdin);
+
+    stream_set_blocking($stdout, false);
+    stream_set_blocking($stderr, false);
+
+    $stdoutEof = false;
+    $stderrEof = false;
+    $stderrBuffer = '';
+
+    do {
+        $read = [$stdout, $stderr];
+        $write = null;
+        $except = null;
+
+        stream_select($read, $write, $except, 1, 0);
+
+        foreach ($read as $stream) {
+            $chunk = fgets($stream);
+            if ($stream === $stderr) {
+                $stderrBuffer .= $chunk;
+            }
+        }
+
+        $stdoutEof = $stdoutEof || feof($stdout);
+        $stderrEof = $stderrEof || feof($stderr);
+    } while(!$stdoutEof || !$stderrEof);
+
+    $time = (hrtime(true) - $start) / 1e9;
+
+    fclose($stdout);
+    fclose($stderr);
+    $statusCode = proc_close($processHandle);
+
+    if ($statusCode !== 0) {
+        fwrite(STDERR, $stderrBuffer);
+        fwrite(STDERR, 'Exited with status code ' . $statusCode . "\n");
+        exit($statusCode);
+    }
+
+    if ($cgi) {
+        $time = extract_measurement($stderrBuffer);
+    }
+
+    return $time;
+}
+
+function print_temp(string $message) {
+    static $lineLength = 0;
+    if ($lineLength) {
+        echo str_repeat(' ', $lineLength), "\r";
+    }
+    echo $message, "\r";
+    flush();
+    $lineLength = strlen($message);
+}
+
+function print_progress(int $max, array $oldValues, array $newValues) {
+    $length = 30;
+    $current = count($oldValues) + count($newValues);
+    $progress = round($length / $max * $current);
+    print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$max");
+}
+
+function main($argv) {
+    array_shift($argv);
+
+    $cgi = false;
+    foreach ($argv as $i => $arg) {
+        if ($arg === '--cgi') {
+            $cgi = true;
+            unset($argv[$i]);
+        }
+    }
+    $argv = array_values($argv);
+
+    if (count($argv) !== 3) {
+        fwrite(STDERR, "Expecting exactly three inputs\n");
+        exit(1);
+    }
+
+    $repetitions = (int) $argv[0];
+    if ($repetitions <= 1) {
+        fwrite(STDERR, "Repetitions must be >= 2\n");
+        exit(1);
+    }
+
+    $oldCmd = $argv[1];
+    $newCmd = $argv[2];
+
+    $oldValues = [];
+    $newValues = [];
+
+    print_progress($repetitions * 2, $oldValues, $newValues);
+    for ($i = 0; $i < $repetitions; $i++) {
+        $oldValues[] = runCommand($oldCmd, $cgi);
+        print_progress($repetitions * 2, $oldValues, $newValues);
+        $newValues[] = runCommand($newCmd, $cgi);
+        print_progress($repetitions * 2, $oldValues, $newValues);
+    }
+    print_temp('');
+
+    $oldMean = mean($oldValues);
+    $newMean = mean($newValues);
+    $diff = $newMean - $oldMean;
+    $relativeDiff = ($newMean / $oldMean - 1) * 100;
+    $oldStdDev = standard_deviation($oldValues, $oldMean);
+    $newStdDev = standard_deviation($newValues, $newMean);
+    $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
+    $cohensD = cohens_d($oldMean, $newMean, $oldStdDev, $newStdDev);
+    $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
+
+    echo 'Old:       ', format_time($oldMean), ' ± ', format_time($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), ")\n";
+    echo 'New:       ', format_time($newMean), ' ± ', format_time($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), ")\n";
+    echo 'Diff:      ', format_time($diff), ' (', format_percentage($relativeDiff), ")\n";
+    echo 'T-test:    ', number_format($tTest, 3, '.', ''), "\n";
+    echo 'P-value:   ', number_format($pValue, 3, '.', ''), "\n";
+    echo "Cohen's d: ", number_format($cohensD, 3, '.', ''), "\n";
+}
+
+main($argv);
