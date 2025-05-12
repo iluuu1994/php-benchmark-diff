@@ -94,7 +94,9 @@ function runCommand(string $cmd, bool $cgi): float {
     $pipes = null;
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
-    $processHandle = proc_open('taskset -c 0 perf stat -e duration_time ' . $cmd, $descriptorSpec, $pipes, getcwd(), null);
+    $cmd = 'taskset -c 0 ' . $cmd;
+    if (!$cgi) $cmd = 'perf stat -e duration_time ' . $cmd;
+    $processHandle = proc_open($cmd, $descriptorSpec, $pipes, getcwd(), null);
 
     $stdin = $pipes[0];
     $stdout = $pipes[1];
