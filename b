@@ -2,11 +2,6 @@
 <?php
 
 function extract_measurement(string $input): float {
-    if (preg_match("(Elapsed time: (?<time>[0-9]+\\.[0-9]+) sec)", $input, $matches) === 0) {
-        fwrite(STDERR, "Elapsed cgi time could not be detected\n");
-        exit(1);
-    }
-    return $matches['time'];
 }
 
 function mean(array $values): float {
@@ -99,8 +94,7 @@ function runCommand(string $cmd, bool $cgi): float {
     $pipes = null;
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
-    $start = hrtime(true);
-    $processHandle = proc_open('taskset -c 0 ' . $cmd, $descriptorSpec, $pipes, getcwd(), null);
+    $processHandle = proc_open('taskset -c 0 perf stat -e duration_time ' . $cmd, $descriptorSpec, $pipes, getcwd(), null);
 
     $stdin = $pipes[0];
     $stdout = $pipes[1];
@@ -133,8 +127,6 @@ function runCommand(string $cmd, bool $cgi): float {
         $stderrEof = $stderrEof || feof($stderr);
     } while(!$stdoutEof || !$stderrEof);
 
-    $time = (hrtime(true) - $start) / 1e9;
-
     fclose($stdout);
     fclose($stderr);
     $statusCode = proc_close($processHandle);
@@ -145,11 +137,12 @@ function runCommand(string $cmd, bool $cgi): float {
         exit($statusCode);
     }
 
-    if ($cgi) {
-        $time = extract_measurement($stderrBuffer);
+    $regex = $cgi ? "(Elapsed time: (?<time>[0-9]+\\.[0-9]+) sec)" : "((?<time>[0-9]+\\.[0-9]+) seconds time elapsed)";
+    if (preg_match($regex, $stderrBuffer, $matches) === 0) {
+        fwrite(STDERR, "Elapsed time could not be detected\n");
+        exit(1);
     }
-
-    return $time;
+    return $matches['time'];
 }
 
 function print_temp(string $message) {
