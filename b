@@ -1,9 +1,6 @@
 #!/usr/bin/env php
 <?php
 
-function extract_measurement(string $input): float {
-}
-
 function mean(array $values): float {
     return array_sum($values) / count($values);
 }
@@ -90,12 +87,25 @@ function format_percentage(float $num) {
     return number_format($num, 3, '.', '') . '%';
 }
 
-function runCommand(string $cmd, bool $cgi): float {
+function runCommand(string $cmd, string $mode): float {
     $pipes = null;
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
     $cmd = 'taskset -c 0 ' . $cmd;
-    if (!$cgi) $cmd = 'perf stat -e duration_time ' . $cmd;
+
+    switch ($mode) {
+        case 'cycles':
+        case 'duration_time':
+        case 'instructions':
+            $cmd = "perf stat -e $mode $cmd";
+            break;
+        case 'cgi':
+            break;
+        default:
+            fwrite(STDERR, "Unknown mode $mode\n");
+            exit(1);
+    }
+
     $processHandle = proc_open($cmd, $descriptorSpec, $pipes, getcwd(), null);
 
     $stdin = $pipes[0];
@@ -139,12 +149,19 @@ function runCommand(string $cmd, bool $cgi): float {
         exit($statusCode);
     }
 
-    $regex = $cgi ? "(Elapsed time: (?<time>[0-9]+\\.[0-9]+) sec)" : "((?<time>[0-9]+\\.[0-9]+) seconds time elapsed)";
+    $regex = match ($mode) {
+        'cgi' => "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)",
+        'cycles' => "((?<value>[0-9’]+)( )+cpu_core/cycles/u)",
+        'duration_time' => "((?<value>[0-9]+\\.[0-9]+) seconds time elapsed)",
+        'instructions' => "((?<value>[0-9’]+)( )+cpu_core/instructions/u)",
+    };
     if (preg_match($regex, $stderrBuffer, $matches) === 0) {
-        fwrite(STDERR, "Elapsed time could not be detected\n");
+        fwrite(STDERR, "Value $mode could not be detected\n");
         exit(1);
     }
-    return $matches['time'];
+    $value = (float)str_replace('’', '', $matches['value']);
+    if ($mode === 'cycles' || $mode === 'instructions') $value /= 1e6;
+    return $value;
 }
 
 function print_temp(string $message) {
@@ -167,10 +184,10 @@ function print_progress(int $max, array $oldValues, array $newValues) {
 function main($argv) {
     array_shift($argv);
 
-    $cgi = false;
+    $mode = 'duration_time';
     foreach ($argv as $i => $arg) {
-        if ($arg === '--cgi') {
-            $cgi = true;
+        if (preg_match('(--mode=(?<mode>.*))', $arg, $matches)) {
+            $mode = $matches['mode'];
             unset($argv[$i]);
         }
     }
@@ -195,9 +212,9 @@ function main($argv) {
 
     print_progress($repetitions * 2, $oldValues, $newValues);
     for ($i = 0; $i < $repetitions; $i++) {
-        $oldValues[] = runCommand($oldCmd, $cgi);
+        $oldValues[] = runCommand($oldCmd, $mode);
         print_progress($repetitions * 2, $oldValues, $newValues);
-        $newValues[] = runCommand($newCmd, $cgi);
+        $newValues[] = runCommand($newCmd, $mode);
         print_progress($repetitions * 2, $oldValues, $newValues);
     }
     print_temp('');
