@@ -151,15 +151,15 @@ function runCommand(string $cmd, string $mode): float {
 
     $regex = match ($mode) {
         'cgi' => "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)",
-        'cycles' => "((?<value>[0-9’]+)( )+(cycles:u|cpu_core/cycles/u))",
+        'cycles' => "((?<value>[0-9’,]+)( )+(cycles:u|cpu_core/cycles/u))",
         'duration_time' => "((?<value>[0-9]+\\.[0-9]+) seconds time elapsed)",
-        'instructions' => "((?<value>[0-9’]+)( )+(instructions:u|cpu_core/instructions/u))",
+        'instructions' => "((?<value>[0-9’,]+)( )+(instructions:u|cpu_core/instructions/u))",
     };
     if (preg_match($regex, $stderrBuffer, $matches) === 0) {
         fwrite(STDERR, "Value $mode could not be detected\n");
         exit(1);
     }
-    $value = (float)str_replace('’', '', $matches['value']);
+    $value = (float)str_replace(['’', ','], '', $matches['value']);
     if ($mode === 'cycles' || $mode === 'instructions') $value /= 1e6;
     return $value;
 }
