@@ -181,6 +181,11 @@ function print_progress(int $max, array $oldValues, array $newValues) {
     print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$max");
 }
 
+function filter_interquartile_range($values) {
+    sort($values);
+    return array_slice($values, 0, (int)ceil(count($values) * 0.25));
+}
+
 function main($argv) {
     array_shift($argv);
 
@@ -218,6 +223,9 @@ function main($argv) {
         print_progress($repetitions * 2, $oldValues, $newValues);
     }
     print_temp('');
+
+    $oldValues = filter_interquartile_range($oldValues);
+    $newValues = filter_interquartile_range($newValues);
 
     $oldMean = mean($oldValues);
     $newMean = mean($newValues);
