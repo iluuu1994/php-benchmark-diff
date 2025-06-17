@@ -79,19 +79,36 @@ function p_value(int $df, float $tTest): float {
     throw new Exception('Unreachable');
 }
 
-function format_time(float $num) {
-    return number_format($num, 6, '.', '');
+function format_value(float $value) {
+    $metricPrefixes = [
+        [1e12, 'T'],
+        [1e9, 'G'],
+        [1e6, 'M'],
+        [1e3, 'k'],
+        [1, ''],
+        [1e-3, 'm'],
+        [1e-6, 'µ'],
+        [1e-9, 'n'],
+        [1e-12, 'p'],
+    ];
+
+    $absValue = abs($value);
+
+    foreach ($metricPrefixes as $i => [$factor, $prefix]) {
+        if ($absValue >= $factor || $i === count($metricPrefixes) - 1) {
+            $formatted = $value / $factor;
+            return number_format($formatted, 3) . ' ' . $prefix;
+        }
+    }
 }
 
 function format_percentage(float $num) {
-    return number_format($num, 3, '.', '') . '%';
+    return number_format($num, 3, '.', '');
 }
 
 function runCommand(string $cmd, string $mode): float {
     $pipes = null;
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-
-    $cmd = 'taskset -c 0 ' . $cmd;
 
     switch ($mode) {
         case 'cycles':
@@ -105,6 +122,8 @@ function runCommand(string $cmd, string $mode): float {
             fwrite(STDERR, "Unknown mode $mode\n");
             exit(1);
     }
+
+    $cmd = 'taskset -c 0 ' . $cmd;
 
     $processHandle = proc_open($cmd, $descriptorSpec, $pipes, getcwd(), null);
 
@@ -151,16 +170,15 @@ function runCommand(string $cmd, string $mode): float {
 
     $regex = match ($mode) {
         'cgi' => "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)",
-        'cycles' => "((?<value>[0-9’,]+)( )+(cycles:u|cpu_core/cycles/u))",
+        'cycles' => "((?<value>[0-9’,]+)( )+(cycles:u|cpu_core/cycles/(u)?))",
         'duration_time' => "((?<value>[0-9]+\\.[0-9]+) seconds time elapsed)",
-        'instructions' => "((?<value>[0-9’,]+)( )+(instructions:u|cpu_core/instructions/u))",
+        'instructions' => "((?<value>[0-9’,]+)( )+(instructions:u|cpu_core/instructions/(u)?))",
     };
     if (preg_match($regex, $stderrBuffer, $matches) === 0) {
         fwrite(STDERR, "Value $mode could not be detected\n");
         exit(1);
     }
     $value = (float)str_replace(['’', ','], '', $matches['value']);
-    if ($mode === 'cycles' || $mode === 'instructions') $value /= 1e6;
     return $value;
 }
 
@@ -181,18 +199,33 @@ function print_progress(int $max, array $oldValues, array $newValues) {
     print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$max");
 }
 
-function filter_interquartile_range($values) {
+function filter_interquartile_range($values, ?int $window) {
+    if ($window === null) {
+        /* The default window is 25%. */
+        $window = (int)ceil(count($values) * 0.25);
+        if ($window < 5) $window = 5;
+    }
     sort($values);
-    return array_slice($values, 0, (int)ceil(count($values) * 0.25));
+    return array_slice($values, 0, $window);
 }
 
 function main($argv) {
     array_shift($argv);
 
     $mode = 'duration_time';
+    $window = null;
     foreach ($argv as $i => $arg) {
-        if (preg_match('(--mode=(?<mode>.*))', $arg, $matches)) {
+        if (preg_match('(^--mode=(?<mode>.*)$)', $arg, $matches)) {
             $mode = $matches['mode'];
+            unset($argv[$i]);
+        }
+        if (preg_match('(^--window=(?<window>.*)$)', $arg, $matches)) {
+            $window = $matches['window'];
+            if (!ctype_digit($window) || $window < 1 || $window < 1) {
+                fwrite(STDERR, "--window must be an integer >= 1\n");
+                exit(1);
+            }
+            $window = (int)$window;
             unset($argv[$i]);
         }
     }
@@ -204,8 +237,8 @@ function main($argv) {
     }
 
     $repetitions = (int) $argv[0];
-    if ($repetitions <= 1) {
-        fwrite(STDERR, "Repetitions must be >= 2\n");
+    if ($repetitions < 1) {
+        fwrite(STDERR, "Repetitions must be >= 1\n");
         exit(1);
     }
 
@@ -224,23 +257,36 @@ function main($argv) {
     }
     print_temp('');
 
-    $oldValues = filter_interquartile_range($oldValues);
-    $newValues = filter_interquartile_range($newValues);
+    $oldValues = filter_interquartile_range($oldValues, $window);
+    $newValues = filter_interquartile_range($newValues, $window);
 
     $oldMean = mean($oldValues);
     $newMean = mean($newValues);
     $diff = $newMean - $oldMean;
     $relativeDiff = ($newMean / $oldMean - 1) * 100;
-    $oldStdDev = standard_deviation($oldValues, $oldMean);
-    $newStdDev = standard_deviation($newValues, $newMean);
-    $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
-    $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
 
-    echo 'Old:       ', format_time($oldMean), ' ± ', format_time($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), ")\n";
-    echo 'New:       ', format_time($newMean), ' ± ', format_time($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), ")\n";
-    echo 'Diff:      ', format_time($diff), ' (', format_percentage($relativeDiff), ")\n";
-    echo 'T-test:    ', number_format($tTest, 3, '.', ''), "\n";
-    echo 'P-value:   ', number_format($pValue, 3, '.', ''), "\n";
+    echo 'Old:       ', format_value($oldMean);
+    if (count($oldValues) > 1) {
+        $oldStdDev = standard_deviation($oldValues, $oldMean);
+        echo ' ± ', format_value($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), "%)";
+    }
+    echo "\n";
+
+    echo 'New:       ', format_value($newMean);
+    if (count($newValues) > 1) {
+        $newStdDev = standard_deviation($newValues, $newMean);
+        echo ' ± ', format_value($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), "%)";
+    }
+    echo "\n";
+
+    echo 'Diff:      ', format_value($diff), ' (', format_percentage($relativeDiff), "%)\n";
+
+    if (count($oldValues) > 1 && count($newValues) > 1) {
+        $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
+        $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
+        echo 'T-test:    ', format_percentage($tTest), "\n";
+        echo 'P-value:   ', format_percentage($pValue), "\n";
+    }
 }
 
 main($argv);
