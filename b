@@ -110,17 +110,8 @@ function runCommand(string $cmd, string $mode): float {
     $pipes = null;
     $descriptorSpec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
-    switch ($mode) {
-        case 'cycles':
-        case 'duration_time':
-        case 'instructions':
-            $cmd = "perf stat -e $mode $cmd";
-            break;
-        case 'cgi':
-            break;
-        default:
-            fwrite(STDERR, "Unknown mode $mode\n");
-            exit(1);
+    if ($mode !== 'cgi') {
+        $cmd = "perf stat -e $mode $cmd";
     }
 
     $cmd = 'taskset -c 0 ' . $cmd;
@@ -168,12 +159,9 @@ function runCommand(string $cmd, string $mode): float {
         exit($statusCode);
     }
 
-    $regex = match ($mode) {
-        'cgi' => "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)",
-        'cycles' => "((?<value>[0-9’,]+)( )+(cycles:u|cpu_core/cycles/(u)?))",
-        'duration_time' => "((?<value>[0-9]+\\.[0-9]+) seconds time elapsed)",
-        'instructions' => "((?<value>[0-9’,]+)( )+(instructions:u|cpu_core/instructions/(u)?))",
-    };
+    $regex = $mode === 'cgi'
+        ? "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)"
+        : "((?<value>[0-9’,]+)( )+(cpu_core/)?$mode(:u|/|/u)?)";
     if (preg_match($regex, $stderrBuffer, $matches) === 0) {
         fwrite(STDERR, "Value $mode could not be detected\n");
         exit(1);
