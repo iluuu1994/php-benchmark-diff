@@ -193,8 +193,8 @@ function filter_interquartile_range($values, ?int $window) {
         $window = (int)ceil(count($values) * 0.25);
         if ($window < 5) $window = 5;
     }
-    sort($values);
-    return array_slice($values, 0, $window);
+    asort($values);
+    return array_slice($values, 0, $window, true);
 }
 
 function main($argv) {
@@ -244,6 +244,10 @@ function main($argv) {
         print_progress($repetitions * 2, $oldValues, $newValues);
     }
     print_temp('');
+
+    /* Print indexes of picked runs. */
+    // echo json_encode(array_keys($oldValues)), "\n";
+    // echo json_encode(array_keys($newValues)), "\n";
 
     $oldValues = filter_interquartile_range($oldValues, $window);
     $newValues = filter_interquartile_range($newValues, $window);
