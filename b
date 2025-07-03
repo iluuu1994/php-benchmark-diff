@@ -187,7 +187,7 @@ function print_progress(?int $max, int $current) {
     print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$maxLabel");
 }
 
-function filter_interquartile_range($values, float $window) {
+function trim_values_to_window($values, float $window) {
     $windowSize = max(5, (int)ceil(count($values) * $window));
     asort($values);
     return array_slice($values, 0, $windowSize, true);
@@ -264,8 +264,8 @@ function main($argv) {
     } while ($i < $runs);
     print_temp('');
 
-    $oldValues = filter_interquartile_range($oldValues, $window);
-    $newValues = filter_interquartile_range($newValues, $window);
+    $oldValues = trim_values_to_window($oldValues, $window);
+    $newValues = trim_values_to_window($newValues, $window);
 
     /* Print indexes of picked runs. */
     // echo json_encode(array_keys($oldValues)), "\n";
