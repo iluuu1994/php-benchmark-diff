@@ -180,28 +180,26 @@ function print_temp(string $message) {
     $lineLength = strlen($message);
 }
 
-function print_progress(int $max, array $oldValues, array $newValues) {
+function print_progress(?int $max, int $current) {
     $length = 30;
-    $current = count($oldValues) + count($newValues);
-    $progress = round($length / $max * $current);
-    print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$max");
+    $progress = $max !== null ? round($length / $max * $current) : 0;
+    $maxLabel = $max !== null ? $max : '?';
+    print_temp('[' . str_repeat('-', $progress) . str_repeat(' ', $length - $progress) . "] $current/$maxLabel");
 }
 
-function filter_interquartile_range($values, ?int $window) {
-    if ($window === null) {
-        /* The default window is 25%. */
-        $window = (int)ceil(count($values) * 0.25);
-        if ($window < 5) $window = 5;
-    }
+function filter_interquartile_range($values, float $window) {
+    $windowSize = max(5, (int)ceil(count($values) * $window));
     asort($values);
-    return array_slice($values, 0, $window, true);
+    return array_slice($values, 0, $windowSize, true);
 }
 
 function main($argv) {
     array_shift($argv);
 
     $mode = 'duration_time';
-    $window = null;
+    $window = 0.25;
+    $runs = null;
+    $time = 5;
     foreach ($argv as $i => $arg) {
         if (preg_match('(^--mode=(?<mode>.*)$)', $arg, $matches)) {
             $mode = $matches['mode'];
@@ -209,40 +207,61 @@ function main($argv) {
         }
         if (preg_match('(^--window=(?<window>.*)$)', $arg, $matches)) {
             $window = $matches['window'];
-            if (!ctype_digit($window) || $window < 1 || $window < 1) {
-                fwrite(STDERR, "--window must be an integer >= 1\n");
+            if (!is_numeric($window) || $window <= 0 || $window > 1) {
+                fwrite(STDERR, "--window must be a float > 0 <= 1\n");
                 exit(1);
             }
-            $window = (int)$window;
+            $window = (float)$window;
+            unset($argv[$i]);
+        }
+        if (preg_match('(^--runs=(?<runs>.*)$)', $arg, $matches)) {
+            $runs = $matches['runs'];
+            if (!ctype_digit($runs) || $runs < 1) {
+                fwrite(STDERR, "--runs must be an integer >= 1\n");
+                exit(1);
+            }
+            $runs = (int)$runs;
+            unset($argv[$i]);
+        }
+        if (preg_match('(^--time=(?<time>.*)$)', $arg, $matches)) {
+            $time = $matches['time'];
+            if (!ctype_digit($time) || $time <= 0) {
+                fwrite(STDERR, "--time must be an integer > 0\n");
+                exit(1);
+            }
+            $time = (int)$time;
             unset($argv[$i]);
         }
     }
     $argv = array_values($argv);
 
-    if (count($argv) !== 3) {
+    if (count($argv) !== 2) {
         fwrite(STDERR, "Expecting exactly three inputs\n");
         exit(1);
     }
 
-    $repetitions = (int) $argv[0];
-    if ($repetitions < 1) {
-        fwrite(STDERR, "Repetitions must be >= 1\n");
-        exit(1);
-    }
-
-    $oldCmd = $argv[1];
-    $newCmd = $argv[2];
+    $oldCmd = $argv[0];
+    $newCmd = $argv[1];
 
     $oldValues = [];
     $newValues = [];
 
-    print_progress($repetitions * 2, $oldValues, $newValues);
-    for ($i = 0; $i < $repetitions; $i++) {
-        $oldValues[] = runCommand($oldCmd, $mode);
-        print_progress($repetitions * 2, $oldValues, $newValues);
+    print_progress($runs !== null ? $runs * 2 : null, 0);
+    $i = 0;
+    do {
+        if ($runs !== null) {
+            $oldValues[] = runCommand($oldCmd, $mode);
+        } else {
+            $start = microtime(true);
+            $oldValues[] = runCommand($oldCmd, $mode);
+            $delta = microtime(true) - $start;
+            $runs = (int) ceil(min(50, $time / $delta / 2));
+        }
+        print_progress($runs !== null ? $runs * 2 : null, count($oldValues) + count($newValues));
         $newValues[] = runCommand($newCmd, $mode);
-        print_progress($repetitions * 2, $oldValues, $newValues);
-    }
+        print_progress($runs !== null ? $runs * 2 : null, count($oldValues) + count($newValues));
+        $i++;
+    } while ($i < $runs);
     print_temp('');
 
     /* Print indexes of picked runs. */
