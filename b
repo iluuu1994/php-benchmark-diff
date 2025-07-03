@@ -276,28 +276,27 @@ function main($argv) {
     $diff = $newMean - $oldMean;
     $relativeDiff = ($newMean / $oldMean - 1) * 100;
 
-    echo 'Old:       ', format_value($oldMean);
+    echo 'Old:   ', format_value($oldMean);
     if (count($oldValues) > 1) {
         $oldStdDev = standard_deviation($oldValues, $oldMean);
         echo ' ± ', format_value($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), "%)";
     }
     echo "\n";
 
-    echo 'New:       ', format_value($newMean);
+    echo 'New:   ', format_value($newMean);
     if (count($newValues) > 1) {
         $newStdDev = standard_deviation($newValues, $newMean);
         echo ' ± ', format_value($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), "%)";
     }
     echo "\n";
 
-    echo 'Diff:      ', format_value($diff), ' (', format_percentage($relativeDiff), "%)\n";
-
+    echo 'Diff:  ', format_value($diff), ' (', ($relativeDiff >= 0 ? '+' : ''), format_percentage($relativeDiff), "%";
     if (count($oldValues) > 1 && count($newValues) > 1) {
         $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
         $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
-        echo 'T-test:    ', format_percentage($tTest), "\n";
-        echo 'P-value:   ', format_percentage($pValue), "\n";
+        echo ', p < ', format_percentage($pValue);
     }
+    echo ")\n";
 }
 
 main($argv);
