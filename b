@@ -264,12 +264,12 @@ function main($argv) {
     } while ($i < $runs);
     print_temp('');
 
+    $oldValues = filter_interquartile_range($oldValues, $window);
+    $newValues = filter_interquartile_range($newValues, $window);
+
     /* Print indexes of picked runs. */
     // echo json_encode(array_keys($oldValues)), "\n";
     // echo json_encode(array_keys($newValues)), "\n";
-
-    $oldValues = filter_interquartile_range($oldValues, $window);
-    $newValues = filter_interquartile_range($newValues, $window);
 
     $oldMean = mean($oldValues);
     $newMean = mean($newValues);
