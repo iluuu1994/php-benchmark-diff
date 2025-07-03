@@ -235,68 +235,68 @@ function main($argv) {
     }
     $argv = array_values($argv);
 
-    if (count($argv) !== 2) {
-        fwrite(STDERR, "Expecting exactly three inputs\n");
+    if (count($argv) < 1) {
+        fwrite(STDERR, "Expecting at least one input\n");
         exit(1);
     }
 
-    $oldCmd = $argv[0];
-    $newCmd = $argv[1];
+    $cmds = $argv;
+    $nCmds = count($cmds);
+    $valueGroup = [];
 
-    $oldValues = [];
-    $newValues = [];
-
-    print_progress($runs !== null ? $runs * 2 : null, 0);
+    print_progress($runs !== null ? $runs * $nCmds : null, 0);
     $i = 0;
     do {
-        if ($runs !== null) {
-            $oldValues[] = runCommand($oldCmd, $mode);
-        } else {
-            $start = microtime(true);
-            $oldValues[] = runCommand($oldCmd, $mode);
-            $delta = microtime(true) - $start;
-            $runs = (int) ceil(min(50, $time / $delta / 2));
+        foreach ($cmds as $iCmd => $cmd) {
+            if ($runs !== null) {
+                $valueGroup[$iCmd][] = runCommand($cmd, $mode);
+            } else {
+                $start = microtime(true);
+                $valueGroup[$iCmd][] = runCommand($cmd, $mode);
+                $delta = microtime(true) - $start;
+                $runs = (int) ceil(min(50, $time / $delta / $nCmds));
+            }
+            print_progress($runs * $nCmds, ($i * $nCmds) + $iCmd + 1);
         }
-        print_progress($runs !== null ? $runs * 2 : null, count($oldValues) + count($newValues));
-        $newValues[] = runCommand($newCmd, $mode);
-        print_progress($runs !== null ? $runs * 2 : null, count($oldValues) + count($newValues));
         $i++;
     } while ($i < $runs);
     print_temp('');
 
-    $oldValues = trim_values_to_window($oldValues, $window);
-    $newValues = trim_values_to_window($newValues, $window);
+    $results = [];
+    foreach ($valueGroup as $i => &$values) {
+        $values = trim_values_to_window($values, $window);
+        /* Print indexes of picked runs. */
+        // echo json_encode(array_keys($values)), "\n";
 
-    /* Print indexes of picked runs. */
-    // echo json_encode(array_keys($oldValues)), "\n";
-    // echo json_encode(array_keys($newValues)), "\n";
+        echo '$ ', $cmds[$i], "\n";
 
-    $oldMean = mean($oldValues);
-    $newMean = mean($newValues);
-    $diff = $newMean - $oldMean;
-    $relativeDiff = ($newMean / $oldMean - 1) * 100;
+        $mean = mean($values);
+        echo '  x = ', format_value($mean);
 
-    echo 'Old:   ', format_value($oldMean);
-    if (count($oldValues) > 1) {
-        $oldStdDev = standard_deviation($oldValues, $oldMean);
-        echo ' ± ', format_value($oldStdDev), ' (', format_percentage(100 / $oldMean * $oldStdDev), "%)";
+        $stdDev = null;
+        if ($runs > 1) {
+            $stdDev = standard_deviation($values, $mean);
+            echo ' ± ', format_value($stdDev), ' (', format_percentage(100 / $mean * $stdDev), "%)";
+        }
+        echo "\n";
+
+        $results[$i] = ['mean' => $mean, 'stdDev' => $stdDev];
+
+        if ($i > 0) {
+            $baseMean = $results[0]['mean'];
+            $baseStdDev = $results[0]['stdDev'];
+            $diff = $mean - $baseMean;
+            $relativeDiff = ($mean / $baseMean - 1) * 100;
+
+            echo '  Δ = ', format_value($diff), ' (', ($relativeDiff >= 0 ? '+' : ''), format_percentage($relativeDiff), "%";
+            if ($stdDev !== null && $baseStdDev !== null) {
+                $tTest = independent_t_test($runs, $baseMean, $baseStdDev, $runs, $mean, $stdDev);
+                $pValue = p_value(($runs * 2) - 2, $tTest);
+                echo ', p < ', format_percentage($pValue);
+            }
+            echo ")\n";
+        }
     }
-    echo "\n";
-
-    echo 'New:   ', format_value($newMean);
-    if (count($newValues) > 1) {
-        $newStdDev = standard_deviation($newValues, $newMean);
-        echo ' ± ', format_value($newStdDev), ' (', format_percentage(100 / $newMean * $newStdDev), "%)";
-    }
-    echo "\n";
-
-    echo 'Diff:  ', format_value($diff), ' (', ($relativeDiff >= 0 ? '+' : ''), format_percentage($relativeDiff), "%";
-    if (count($oldValues) > 1 && count($newValues) > 1) {
-        $tTest = independent_t_test(count($oldValues), $oldMean, $oldStdDev, count($newValues), $newMean, $newStdDev);
-        $pValue = p_value(count($oldValues) + count($newValues) - 2, $tTest);
-        echo ', p < ', format_percentage($pValue);
-    }
-    echo ")\n";
 }
 
 main($argv);
