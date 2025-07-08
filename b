@@ -196,11 +196,20 @@ function trim_values_to_window($values, float $window) {
 function main($argv) {
     array_shift($argv);
 
+    $output = null;
     $mode = 'duration_time';
     $window = 0.25;
     $runs = null;
     $time = 5;
     foreach ($argv as $i => $arg) {
+        if (preg_match('(^--output=(?<output>.*)$)', $arg, $matches)) {
+            $output = $matches['output'];
+            if ($output !== 'json') {
+                fwrite(STDERR, "--output must be \"json\"\n");
+                exit(1);
+            }
+            unset($argv[$i]);
+        }
         if (preg_match('(^--mode=(?<mode>.*)$)', $arg, $matches)) {
             $mode = $matches['mode'];
             unset($argv[$i]);
@@ -244,7 +253,9 @@ function main($argv) {
     $nCmds = count($cmds);
     $valueGroup = [];
 
-    print_progress($runs !== null ? $runs * $nCmds : null, 0);
+    if ($output === null) {
+        print_progress($runs !== null ? $runs * $nCmds : null, 0);
+    }
     $i = 0;
     do {
         foreach ($cmds as $iCmd => $cmd) {
@@ -256,11 +267,15 @@ function main($argv) {
                 $delta = microtime(true) - $start;
                 $runs = (int) ceil(min(50, $time / $delta / $nCmds));
             }
-            print_progress($runs * $nCmds, ($i * $nCmds) + $iCmd + 1);
+            if ($output === null) {
+                print_progress($runs * $nCmds, ($i * $nCmds) + $iCmd + 1);
+            }
         }
         $i++;
     } while ($i < $runs);
-    print_temp('');
+    if ($output === null) {
+        print_temp('');
+    }
 
     $results = [];
     foreach ($valueGroup as $i => &$values) {
@@ -268,34 +283,58 @@ function main($argv) {
         /* Print indexes of picked runs. */
         // echo json_encode(array_keys($values)), "\n";
 
-        echo '$ ', $cmds[$i], "\n";
-
         $mean = mean($values);
-        echo '  x = ', format_value($mean);
 
         $stdDev = null;
+        $relativeStdDev = null;
         if ($runs > 1) {
             $stdDev = standard_deviation($values, $mean);
-            echo ' ± ', format_value($stdDev), ' (', format_percentage(100 / $mean * $stdDev), "%)";
+            $relativeStdDev = 100 / $mean * $stdDev;
         }
-        echo "\n";
 
-        $results[$i] = ['mean' => $mean, 'stdDev' => $stdDev];
+        $results[$i] = ['mean' => $mean, 'stdDev' => $stdDev, 'relativeStdDev' => $relativeStdDev];
 
         if ($i > 0) {
             $baseMean = $results[0]['mean'];
             $baseStdDev = $results[0]['stdDev'];
-            $diff = $mean - $baseMean;
-            $relativeDiff = ($mean / $baseMean - 1) * 100;
+            $results[$i]['diff'] = $mean - $baseMean;
+            $results[$i]['relativeDiff'] = ($mean / $baseMean - 1) * 100;
 
-            echo '  Δ = ', format_value($diff), ' (', ($relativeDiff >= 0 ? '+' : ''), format_percentage($relativeDiff), "%";
             if ($stdDev !== null && $baseStdDev !== null) {
                 $tTest = independent_t_test($runs, $baseMean, $baseStdDev, $runs, $mean, $stdDev);
-                $pValue = p_value(($runs * 2) - 2, $tTest);
-                echo ', p < ', format_percentage($pValue);
+                $results[$i]['p-value'] = p_value(($runs * 2) - 2, $tTest);
             }
-            echo ")\n";
         }
+    }
+
+    if ($output === null) {
+        foreach ($results as $i => $result) {
+            $mean = $result['mean'];
+
+            echo '$ ', $cmds[$i], "\n";
+            echo '  x = ', format_value($mean);
+            if (isset($result['stdDev'])) {
+                $stdDev = $result['stdDev'];
+                $relativeStdDev = $result['relativeStdDev'];
+                echo ' ± ', format_value($stdDev), ' (', format_percentage($relativeStdDev), "%)";
+            }
+            echo "\n";
+
+            if (isset($result['diff'])) {
+                $diff = $result['diff'];
+                $relativeDiff = $result['relativeDiff'];
+
+                echo '  Δ = ', format_value($diff), ' (', ($relativeDiff >= 0 ? '+' : ''), format_percentage($relativeDiff), "%";
+
+                if ($stdDev !== null && $baseStdDev !== null) {
+                    $pValue = $results[$i]['p-value'];
+                    echo ', p < ', format_percentage($pValue);
+                }
+                echo ")\n";
+            }
+        }
+    } else if ($output === 'json') {
+        echo json_encode($results), "\n";
     }
 }
 
