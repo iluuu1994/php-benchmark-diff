@@ -163,7 +163,8 @@ function runCommand(string $cmd, string $mode): float {
         ? "(Elapsed time: (?<value>[0-9]+\\.[0-9]+) sec)"
         : "((?<value>[0-9’,]+)( )+(cpu_core/)?$mode(:u|/|/u)?)";
     if (preg_match($regex, $stderrBuffer, $matches) === 0) {
-        fwrite(STDERR, "Value $mode could not be detected\n");
+        fwrite(STDERR, "Value $mode could not be detected\n\n");
+        fwrite(STDERR, $stderrBuffer . "\n");
         exit(1);
     }
     $value = (float)str_replace(['’', ','], '', $matches['value']);
